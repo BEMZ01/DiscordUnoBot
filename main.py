@@ -25,7 +25,7 @@ intents.members = True
 intents.messages = True
 
 logger.debug("Starting bot")
-bot = commands.AutoShardedBot(owner_id=234248229426823168, debug_guilds=[867773426773262346,], intents=intents)
+bot = commands.AutoShardedBot(owner_id=234248229426823168, intents=intents)
 # Load cogs
 for filename in os.listdir('./cogs'):
     if filename.endswith('.py'):

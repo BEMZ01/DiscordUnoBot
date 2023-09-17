@@ -21,6 +21,43 @@ class UnoGame(commands.Cog):
         self.logger.debug(f'Starting matchmaking controller')
         self.matchmaking_controller.start()
 
+    @tasks.loop(seconds=5)
+    async def monitorActiveGames(self):
+        for i, game in enumerate(self.games):
+            if game.status == 'ended':
+                if game.winner is not None:
+                    # update the database with the winner's stats
+                    with sql.connect('data/database.db') as con:
+                        cur = con.cursor()
+                        cur.execute('SELECT wins,losses FROM playerData WHERE playerID = ?', (game.winner.id,))
+                        fa = cur.fetchall()
+                        if not fa:
+                            cur.execute('INSERT INTO playerData VALUES (?,?,?)', (game.winner.id, 1, 0))
+                        else:
+                            cur.execute('UPDATE playerData SET wins = ? WHERE playerID = ?',
+                                        (fa[0][0] + 1, game.winner.id))
+                            await self.bot.get_user(game.winner.id).send(f'You won the game against {", ".join([str(player.name) for player in game.players if player != game.winner])}!', delete_after=60)
+                        # update the database with the loser's stats
+                        for player in game.players:
+                            if player != game.winner:
+                                cur.execute('SELECT wins,losses FROM playerData WHERE playerID = ?', (player.id,))
+                                fa = cur.fetchall()
+                                if not fa:
+                                    cur.execute('INSERT INTO playerData VALUES (?,?,?)', (player.id, 0, 1))
+                                else:
+                                    cur.execute('UPDATE playerData SET losses = ? WHERE playerID = ?',
+                                                (fa[0][1] + 1, player.id))
+                                    await self.bot.get_user(player.id).send(
+                                        f'You lost the game against {", ".join([str(p.name) for p in game.players if p != player])}!',
+                                        delete_after=60)
+
+                    con.commit()
+                self.games.remove(game)
+                self.logger.info(f'Removed game {i} from the active games list as it has ended')
+            elif game.status == 'cancelled':
+                self.games.remove(game)
+                self.logger.info(f'Removed game {i} from the active games list as it was cancelled')
+
     @tasks.loop(seconds=10)
     async def matchmaking_controller(self):
         with sql.connect('data/database.db') as con:
@@ -63,6 +100,10 @@ class UnoGame(commands.Cog):
                     players[players.index(player)] = self.bot.get_user(player)
                 self.bot.loop.create_task(self.games[-1].setup())
                 self.logger.info(f'Created a game with players {", ".join([str(player) for player in players])}')
+                try:
+                    self.monitorActiveGames.start()
+                except RuntimeError:
+                    self.logger.debug(f'Active game monitor already running')
             con.commit()
 
 

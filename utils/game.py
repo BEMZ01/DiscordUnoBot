@@ -96,6 +96,7 @@ class Table:
         self.force_pickup = 0  # how many cards the next player has to pick up
         self.timer = 60  # how long the current player has to play a card before they are skipped
         # and kicked from the game
+        self.winner = None
 
     @tasks.loop(seconds=10)
     async def update_gameMsg(self):
@@ -146,8 +147,11 @@ class Table:
             self.bot.loop.create_task(self.bot.get_user(player.id).send(message, embed=embed,
                                                                         delete_after=delete_after))
 
-    def canPlay(self, card):
+    def canPlay(self, card, player):
         # A card is allowed to be played if it is the same color or type as the top card in the discard pile
+        # if the player is the current player
+        if player != self.players[self.currentPlayerIndex]:
+            return False
         topCard = self.discard[-1]
         try:
             topCard.overridenColor
@@ -168,7 +172,7 @@ class Table:
             return False
 
     def play(self, player, card):
-        if self.canPlay(card):
+        if self.canPlay(card, player):
             self.discard.append(card)
             player.hand.remove(card)
             return True
@@ -222,7 +226,7 @@ class Table:
                     self.announce(f'The order of play has been reversed!', delete_after=10)
                     self.currentPlayerIndex += 1
                     if self.currentPlayerIndex >= len(self.players):
-                        self.currentPlayerIndex -= len(self.players)
+                        self.currentPlayerIndex -= len(self.players)+1
                 elif topCard.type == '+2':
                     self.force_pickup += 2
                 else:
@@ -236,12 +240,14 @@ class Table:
             for player in self.players:
                 if len(player.hand) == 0 or player.score >= 500:
                     self.status = 'ended'
-                    self.players.sort(key=lambda x: x.score, reverse=True)
+                    # sort players by hand size, lowest to highest
+                    self.players.sort(key=lambda x: len(x.hand))
                     self.winner = self.players[0]
                     print("Game ended")
                     self.announce(f'{self.winner.name} has won the game!\nThanks for playing!', delete_after=10)
+                    for player in self.players:
+                        await player.delete()
                     self.update_gameMsg.stop()
-                    self.cleanup()
                     return True
             return True
         else:
@@ -274,13 +280,16 @@ class Table:
                 if player.id == player_to_play:
                     player_to_play = player
                     break
-            if self.canPlay(player_to_play.hand[card_to_play]):
+            if self.canPlay(player_to_play.hand[card_to_play], player_to_play):
                 self.play(player_to_play, player_to_play.hand[card_to_play])
                 await self.tick(json.loads(interaction.data['custom_id']))
                 for player in self.players:
                     embed, view = await self.createGameEmbedMessage(player)
                     if player == player_to_play:
-                        await interaction.edit_original_response(embed=embed, view=view)
+                        try:
+                            await interaction.edit_original_response(embed=embed, view=view)
+                        except discord.errors.NotFound:
+                            self.logger.error(f'Failed to edit original response for {player.name}')
                     else:
                         await player.send(embed=embed, view=view)
             else:
@@ -327,7 +336,7 @@ class Table:
         # if it's the current player's turn, add a button to draw a card
         if player == self.players[self.currentPlayerIndex]:
             for i, card in enumerate(player.hand):
-                if self.canPlay(card):
+                if self.canPlay(card, player):
                     button = discord.ui.Button(emoji=self.convertCardtoName(card),
                                                label=f"{card.color} {card.type}".title(),
                                                custom_id=json.dumps({'type': 'play_card', 'data': {

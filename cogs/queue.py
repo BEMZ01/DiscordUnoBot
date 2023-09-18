@@ -27,19 +27,38 @@ class Multiplayer(commands.Cog):
                                                                      name=f'{queue} players in queue |'
                                                                           f' {queue * 5} seconds average wait time'))
 
-    # commands
+    async def test_DM(self, user: discord.User):
+        # This function will check weather it is possible to DM a user.
+        try:
+            message = await self.bot.get_user(user.id).send("This is a test message to check if I can DM you.",
+                                                            delete_after=1,
+                                                            silent=True)
+            await message.delete()
+        except discord.errors.Forbidden:
+            self.logger.error(f"Failed to DM User {user.id}")
+            return False
+        except discord.errors.HTTPException:
+            self.logger.error(f"Failed to DM User {user.id}")
+            return False
+        else:
+            return True
+
     @commands.slash_command(name='search', description='Search for a game')
     async def search(self, ctx: discord.ApplicationContext):
-        with sql.connect('data/database.db') as con:
-            cur = con.cursor()
-            cur.execute('SELECT * FROM queue WHERE user_id=?', (ctx.author.id,))
-            if cur.fetchone() is None:
-                cur.execute('INSERT INTO queue VALUES (?)', (ctx.author.id,))
-                await ctx.respond(f'{ctx.author.mention} has joined the queue!', ephemeral=True, delete_after=5)
-            else:
-                cur.execute('DELETE FROM queue WHERE user_id=?', (ctx.author.id,))
-                await ctx.respond(f'{ctx.author.mention} has left the queue!', ephemeral=True, delete_after=5)
-            con.commit()
+        if await self.test_DM(ctx.author):
+            with sql.connect('data/database.db') as con:
+                cur = con.cursor()
+                cur.execute('SELECT * FROM queue WHERE user_id=?', (ctx.author.id,))
+                if cur.fetchone() is None:
+                    cur.execute('INSERT INTO queue VALUES (?)', (ctx.author.id,))
+                    await ctx.respond(f'{ctx.author.mention} has joined the queue!', ephemeral=True, delete_after=5)
+                else:
+                    cur.execute('DELETE FROM queue WHERE user_id=?', (ctx.author.id,))
+                    await ctx.respond(f'{ctx.author.mention} has left the queue!', ephemeral=True, delete_after=5)
+                con.commit()
+        else:
+            await ctx.respond('I was unable to DM you! Please allow me to send you DMs and try again.', ephemeral=True,
+                              delete_after=10)
 
 
 def setup(bot):

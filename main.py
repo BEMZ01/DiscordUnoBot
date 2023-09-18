@@ -3,6 +3,7 @@ from discord.ext import commands
 from dotenv import load_dotenv
 import logging
 import os
+import sqlite3 as sql
 
 logger = logging.getLogger('discord')
 logger.setLevel(logging.DEBUG)
@@ -15,8 +16,6 @@ handler.setFormatter(formatter)
 file_handler.setFormatter(formatter)
 logger.addHandler(handler)
 logger.addHandler(file_handler)
-
-
 
 load_dotenv()
 
@@ -42,6 +41,15 @@ async def on_ready():
     logger.info(f'Logged in as {bot.user.name}#{bot.user.discriminator} ({bot.user.id})')
     logger.info(f'Connected to {len(bot.guilds)} guilds')
 
+
 if __name__ == '__main__':
+    logger.info("Connecting to database")
+    with sql.connect('data/database.db') as con:
+        cur = con.cursor()
+        cur.execute('CREATE TABLE IF NOT EXISTS queue (user_id INTEGER PRIMARY KEY)')
+        cur.execute('CREATE TABLE IF NOT EXISTS playerData (playerID INTEGER PRIMARY KEY UNIQUE NOT NULL, '
+                    'wins INTEGER DEFAULT 0, '
+                    'losses INTEGER DEFAULT 0)')
+        con.commit()
     logger.debug("Starting bot")
     bot.run(os.getenv('DISCORD_TOKEN'))

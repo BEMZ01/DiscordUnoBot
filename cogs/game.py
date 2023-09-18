@@ -1,5 +1,4 @@
 from pprint import pprint
-
 import discord
 from discord.ext import commands, tasks
 import random

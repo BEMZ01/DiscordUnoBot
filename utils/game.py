@@ -234,6 +234,7 @@ class Table:
                 # check if the player has to pick up cards
                 if self.force_pickup > 0:
                     print(f"Giving {self.force_pickup} cards to {self.players[self.currentPlayerIndex].name}")
+                    await self.bot.get_user(self.players[self.currentPlayerIndex].id).send(f"You have to pick up {self.force_pickup} cards!", delete_after=10)
                     for i in range(self.force_pickup):
                         self.players[self.currentPlayerIndex].hand.append(self.deck.pop())
                     self.force_pickup = 0

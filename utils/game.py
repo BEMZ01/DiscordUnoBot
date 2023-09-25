@@ -5,6 +5,7 @@ from pprint import pprint
 import json
 import discord
 from discord.ext import commands, tasks
+from datetime import timedelta, datetime
 
 
 class CardCollection:
@@ -67,6 +68,8 @@ class Player:
         self.score = 0
         self.gameMSG = None
         self.isBot = False
+        # get time since epoch
+        self.lastSeen = int(datetime.now().timestamp())
 
     async def send(self, message=None, embed=None, view=None):
         if self.gameMSG is None:
@@ -85,10 +88,12 @@ class Player:
 
 class Bot(Player):
     def __init__(self, bot, id=None):
+        with open('data/firstnames.txt', 'r') as f:
+            NAMES = f.read().splitlines()
         super().__init__(bot, id)
         if id is None:
             self.id = random.randint(0, 1000000000)
-        self.name = 'Bot'
+        self.name = 'Bot '+random.choice(NAMES).strip()
         self.isBot = True
 
     async def send(self, message=None, embed=None, view=None):
@@ -124,6 +129,33 @@ class Table:
                 embed, view = await self.createGameEmbedMessage(player)
                 await player.send(embed=embed, view=view)
 
+    @tasks.loop(seconds=10)
+    async def check_players(self):
+        """If player is inactive for 1 minute 30 seconds, kick them from the game."""
+        if self.status == 'started':
+            for player in self.players:
+                now = int(datetime.now().timestamp())
+                self.logger.info(f'Player {player.name} was last seen at {now - player.lastSeen}' if not player.isBot else None)
+                if now - player.lastSeen > 60 and not player.isBot:
+                    await self.bot.get_user(player.id).send(f"You will be kicked from the game in "
+                                                            f"{90 - (now - player.lastSeen)} seconds for being "
+                                                            "inactive.", delete_after=30)
+                if now - player.lastSeen > 90 and not player.isBot:
+                    self.players.remove(player)
+                    await player.delete()
+                    self.logger.info(f'Removed player {player.name} from game. (AFK)')
+                    self.currentPlayerIndex -= 1
+                    await self.tick({'type': 'kick', 'data': {'player': player.id}})
+                    if len(self.players) == 1 or len([player for player in self.players if not player.isBot]) == 0:
+                        self.status = 'ended'
+                        self.winner = self.players[0]
+                        self.logger.info(f'Game {self} has ended')
+                        self.announce(f'{self.winner.name} has won the game!\nThanks for playing!', delete_after=10)
+                        for player in self.players:
+                            await player.delete()
+                        self.update_gameMsg.stop()
+                        return True
+
     async def setup(self, bots):
         self.status = 'setup'
         for color in ['red', 'yellow', 'green', 'blue']:
@@ -152,7 +184,8 @@ class Table:
             f"Welcome to Uno! You are playing with {', '.join([str(player.name) for player in self.players])}!\nThe "
             f"game is setting up and will start soon.", delete_after=15)
         self.update_gameMsg.start()
-        await asyncio.sleep(10)
+        self.check_players.start()
+        await asyncio.sleep(3)
         await self.start()
 
     async def start(self):
@@ -324,9 +357,14 @@ class Table:
                 if player.id == player_to_play:
                     player_to_play = player
                     break
+            # if it is the players turn
+            if not player_to_play == self.players[self.currentPlayerIndex]:
+                await interaction.followup.send("It is not your turn!", delete_after=5)
+                return False
             if self.canPlay(player_to_play.hand[card_to_play], player_to_play):
                 self.play(player_to_play, player_to_play.hand[card_to_play])
                 await self.tick(json.loads(interaction.data['custom_id']))
+                player_to_play.lastSeen = int(datetime.now().timestamp())
                 for player in self.players:
                     embed, view = await self.createGameEmbedMessage(player)
                     if player == player_to_play:

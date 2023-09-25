@@ -1,6 +1,5 @@
 # A Cog for handling the queue system for multiplayer games in the bot.
 import datetime
-
 import discord
 from discord import option
 from discord.ext import commands, tasks
@@ -48,7 +47,7 @@ class Multiplayer(commands.Cog):
 
     @commands.slash_command(name='search', description='Search for a game')
     @option(name='bots', description='Whether to include bots in the game', required=False, type=bool)
-    async def search(self, ctx: discord.ApplicationContext, bots: bool = False):
+    async def search(self, ctx: discord.ApplicationContext, bots: bool = True):
         if await self.test_DM(ctx.author):
             with sql.connect('data/database.db') as con:
                 cur = con.cursor()

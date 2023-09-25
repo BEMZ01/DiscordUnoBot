@@ -59,10 +59,14 @@ class Player:
     def __init__(self, bot, id):
         self.bot = bot
         self.id = id
-        self.name = self.bot.get_user(self.id).name
+        if self.id is not None:
+            self.name = self.bot.get_user(self.id).name
+        else:
+            self.name = 'NAME_NOT_SET'
         self.hand = CardCollection()
         self.score = 0
         self.gameMSG = None
+        self.isBot = False
 
     async def send(self, message=None, embed=None, view=None):
         if self.gameMSG is None:
@@ -79,6 +83,21 @@ class Player:
         return f'{self.id}'
 
 
+class Bot(Player):
+    def __init__(self, bot, id=None):
+        super().__init__(bot, id)
+        if id is None:
+            self.id = random.randint(0, 1000000000)
+        self.name = 'Bot'
+        self.isBot = True
+
+    async def send(self, message=None, embed=None, view=None):
+        return True
+
+    async def delete(self):
+        return True
+
+
 class Table:
     def __init__(self, players: list[int], bot: commands.AutoShardedBot):
         self.bot = bot
@@ -86,12 +105,12 @@ class Table:
         self.deck = CardCollection()
         self.discard = CardCollection()
         self.players = [Player(self.bot, player) for player in players]
-        random.shuffle(self.players)
         self.settings = {'maxStackSize': 7,
                          'startCards': 7,
                          'drawUntilPlayable': True}
         self.status = 'waiting'
         self.currentPlayerIndex = -1
+        self.processed_topCard = False  # whether the current player has played a card or not
         self.hasSkipped = False  # whether the current player has been skipped
         self.force_pickup = 0  # how many cards the next player has to pick up
         self.timer = 60  # how long the current player has to play a card before they are skipped
@@ -105,7 +124,7 @@ class Table:
                 embed, view = await self.createGameEmbedMessage(player)
                 await player.send(embed=embed, view=view)
 
-    async def setup(self):
+    async def setup(self, bots):
         self.status = 'setup'
         for color in ['red', 'yellow', 'green', 'blue']:
             for i in range(10):
@@ -119,6 +138,11 @@ class Table:
             self.deck.append(Card('black', 'wild'))
             self.deck.append(Card('black', 'wild+4'))
         self.deck.shuffle()
+        if bots:
+            if len(self.players) < 7:
+                for i in range(7 - len(self.players)):
+                    self.players.append(Bot(self.bot))
+        random.shuffle(self.players)
         for player in self.players:
             for i in range(self.settings['startCards']):
                 player.hand.append(self.deck.pop())
@@ -144,8 +168,9 @@ class Table:
 
     def announce(self, message=None, embed=None, delete_after=None):
         for player in self.players:
-            self.bot.loop.create_task(self.bot.get_user(player.id).send(message, embed=embed,
-                                                                        delete_after=delete_after))
+            if not player.isBot:
+                self.bot.loop.create_task(self.bot.get_user(player.id).send(message, embed=embed,
+                                                                            delete_after=delete_after))
 
     def canPlay(self, card, player):
         # A card is allowed to be played if it is the same color or type as the top card in the discard pile
@@ -197,17 +222,22 @@ class Table:
                 if topCard.type == 'wild+4':
                     self.force_pickup += 4
                 # if a wild card is played, send a message to the player asking them to choose a color
-                view = discord.ui.View()
-                for color in ['red', 'yellow', 'green', 'blue']:
-                    button = discord.ui.Button(label=color.title(), style=discord.ButtonStyle.blurple,
-                                               custom_id=json.dumps({'type': 'wild_choice', 'data': {
-                                                   'color': color,
-                                                   'player': self.players[self.currentPlayerIndex].id}}))
-                    button.callback = WildChoice
-                    view.add_item(button)
-                await self.bot.get_user(self.players[self.currentPlayerIndex].id).send("Choose a color", view=view)
-                while self.discard[-1].overridenColor is None:
-                    await asyncio.sleep(1)
+                if self.players[self.currentPlayerIndex].isBot:
+                    # if the player is a bot, choose a random color
+                    self.discard[-1].overridenColor = random.choice(['red', 'yellow', 'green', 'blue'])
+                else:
+                    view = discord.ui.View()
+                    for color in ['red', 'yellow', 'green', 'blue']:
+                        button = discord.ui.Button(label=color.title(), style=discord.ButtonStyle.blurple,
+                                                   custom_id=json.dumps({'type': 'wild_choice', 'data': {
+                                                       'color': color,
+                                                       'player': self.players[self.currentPlayerIndex].id}}))
+                        button.callback = WildChoice
+                        view.add_item(button)
+                    await self.bot.get_user(self.players[self.currentPlayerIndex].id).send("Choose a color", view=view)
+                    while self.discard[-1].overridenColor is None:
+                        await asyncio.sleep(1)
+            # Main Tick Logic
             self.currentPlayerIndex += 1
             if self.currentPlayerIndex >= len(self.players):
                 self.currentPlayerIndex -= len(self.players)
@@ -226,7 +256,7 @@ class Table:
                     self.announce(f'The order of play has been reversed!', delete_after=10)
                     self.currentPlayerIndex += 1
                     if self.currentPlayerIndex >= len(self.players):
-                        self.currentPlayerIndex -= len(self.players)+1
+                        self.currentPlayerIndex -= len(self.players) + 1
                 elif topCard.type == '+2':
                     self.force_pickup += 2
                 else:
@@ -234,7 +264,9 @@ class Table:
                 # check if the player has to pick up cards
                 if self.force_pickup > 0:
                     print(f"Giving {self.force_pickup} cards to {self.players[self.currentPlayerIndex].name}")
-                    await self.bot.get_user(self.players[self.currentPlayerIndex].id).send(f"You have to pick up {self.force_pickup} cards!", delete_after=10)
+                    if not self.players[self.currentPlayerIndex].isBot:
+                        await self.bot.get_user(self.players[self.currentPlayerIndex].id).send(
+                            f"You have to pick up {self.force_pickup} cards!", delete_after=10)
                     for i in range(self.force_pickup):
                         self.players[self.currentPlayerIndex].hand.append(self.deck.pop())
                     self.force_pickup = 0
@@ -250,6 +282,17 @@ class Table:
                         await player.delete()
                     self.update_gameMsg.stop()
                     return True
+            if self.players[self.currentPlayerIndex].isBot:
+                # Bot accounts will automatically play a card if they can, otherwise they will draw a card
+                for i, card in enumerate(self.players[self.currentPlayerIndex].hand):
+                    if self.canPlay(card, self.players[self.currentPlayerIndex]):
+                        self.play(self.players[self.currentPlayerIndex], card)
+                        await self.tick({'type': 'play_card', 'data': {'card': {'index': i},
+                                                                       'player': self.players[
+                                                                           self.currentPlayerIndex].id}})
+                        return True
+                self.draw(self.players[self.currentPlayerIndex])
+                await self.tick({'type': 'draw_card', 'data': {'player': self.players[self.currentPlayerIndex].id}})
             return True
         else:
             return False

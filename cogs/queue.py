@@ -1,5 +1,8 @@
 # A Cog for handling the queue system for multiplayer games in the bot.
+import datetime
+
 import discord
+from discord import option
 from discord.ext import commands, tasks
 import sqlite3 as sql
 import logging
@@ -44,16 +47,18 @@ class Multiplayer(commands.Cog):
             return True
 
     @commands.slash_command(name='search', description='Search for a game')
-    async def search(self, ctx: discord.ApplicationContext):
+    @option(name='bots', description='Whether to include bots in the game', required=False, type=bool)
+    async def search(self, ctx: discord.ApplicationContext, bots: bool = False):
         if await self.test_DM(ctx.author):
             with sql.connect('data/database.db') as con:
                 cur = con.cursor()
                 cur.execute('SELECT * FROM queue WHERE user_id=?', (ctx.author.id,))
                 if cur.fetchone() is None:
-                    cur.execute('INSERT INTO queue VALUES (?)', (ctx.author.id,))
+                    # get unix epoch timestamp
+                    cur.execute('INSERT INTO queue VALUES (?, ?, ?)', (ctx.author.id, bots, datetime.datetime.now().timestamp()))
                     await ctx.respond(f'{ctx.author.mention} has joined the queue!', ephemeral=True, delete_after=5)
                 else:
-                    cur.execute('DELETE FROM queue WHERE user_id=?', (ctx.author.id,))
+                    cur.execute('DELETE FROM queue WHERE user_id=?', (ctx.author.id, ))
                     await ctx.respond(f'{ctx.author.mention} has left the queue!', ephemeral=True, delete_after=5)
                 con.commit()
         else:

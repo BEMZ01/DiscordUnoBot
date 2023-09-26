@@ -46,7 +46,8 @@ if __name__ == '__main__':
     logger.info("Connecting to database")
     with sql.connect('data/database.db') as con:
         cur = con.cursor()
-        cur.execute('CREATE TABLE IF NOT EXISTS queue (user_id INTEGER PRIMARY KEY)')
+        cur.execute('CREATE TABLE IF NOT EXISTS queue (user_id INTEGER PRIMARY KEY, bots INTEGER DEFAULT 0, '
+                    'timestamp INTEGER NOT NULL)')
         cur.execute('CREATE TABLE IF NOT EXISTS playerData (playerID INTEGER PRIMARY KEY UNIQUE NOT NULL, '
                     'wins INTEGER DEFAULT 0, '
                     'losses INTEGER DEFAULT 0)')

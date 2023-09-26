@@ -7,6 +7,7 @@ import logging
 from utils.game import Table
 import datetime
 
+
 class UnoGame(commands.Cog):
     def __init__(self, bot: commands.AutoShardedBot):
         self.bot = bot
@@ -85,51 +86,57 @@ class UnoGame(commands.Cog):
             for player in queue:
                 cur.execute('SELECT wins,losses,playerID FROM playerData WHERE playerID = ?', (player[0],))
                 fa = cur.fetchall()
-                playerData[player[0]] = fa
-                playerData[player[0]].append(player[1])  # whether the player wants to play with bots
-            # seperate the players who want to play with bots from the players who don't
+                if not fa:
+                    playerData[player[0]] = (0, 0)
+                else:
+                    playerData[player[0]] = (fa[0][0], fa[0][1])
+            # organise into two lists, one with players who want to play with bots and one with players who don't
             playersWithBots = []
             playersWithoutBots = []
-            for player in playerData:
-                if playerData[player][1]:
-                    playersWithBots.append((player, playerData[player][0]))
+            for player in queue:
+                if player[1] == 1:
+                    playersWithBots.append((player[0], playerData[player[0]]))
                 else:
-                    playersWithoutBots.append((player, playerData[player][0]))
-            # sort the players who want to play with bots by their win/loss ratio
-            playersWithBots.sort(key=lambda x: x[1][0] / x[1][1])
-            # sort the players who don't want to play with bots by their win/loss ratio
-            playersWithoutBots.sort(key=lambda x: x[1][0] / x[1][1])
-            # create a list of players to be added to the game
+                    playersWithoutBots.append((player[0], playerData[player[0]]))
+            # sort the lists by the win/loss ratio
+            playersWithBots.sort(key=lambda x: x[1][0] / x[1][1] if x[1][1] != 0 else x[1][0])
+            playersWithoutBots.sort(key=lambda x: x[1][0] / x[1][1] if x[1][1] != 0 else x[1][0])
             players = []
-            # take the top players from the list of players who want to play with bots (upto the table size)
             for i in range(min(len(playersWithBots), self.TableSize)):
                 players.append(playersWithBots[i][0])
             if len(players) > 0:
-                self.create_game(players, True)
+                # create a game with the players and bots
+                self.games.append(Table(players, self.bot))
+                for player in players:
+                    cur.execute('DELETE FROM queue WHERE user_id=?', (player,))
+                    players[players.index(player)] = self.bot.get_user(player)
+                con.commit()
+                self.bot.loop.create_task(self.games[-1].setup(True))
+                self.logger.info(f'Created a game with players {", ".join([str(player) for player in players])}')
+                try:
+                    self.monitorActiveGames.start()
+                except RuntimeError:
+                    self.logger.debug(f'Active game monitor already running')
+                return True
             # take the top players from the list of players who don't want to play with bots (upto the table size)
             players = []
             for i in range(min(len(playersWithoutBots), self.TableSize)):
                 players.append(playersWithoutBots[i][0])
             if len(players) > 1:  # there has to be at least 2 players to start a game
-                self.create_game(players, False)
-
-            con.commit()
-
-    def create_game(self, players, bots=True):
-        # create a game with the players
-        self.games.append(Table(players, self.bot))
-        with sql.connect('data/database.db') as con:
-            for player in players:
-                cur = con.cursor()
-                cur.execute('DELETE FROM queue WHERE user_id=?', (player,))
-                players[players.index(player)] = self.bot.get_user(player)
-            con.commit()
-        self.bot.loop.create_task(self.games[-1].setup(bots))
-        self.logger.info(f'Created a game with players {", ".join([str(player) for player in players])}')
-        try:
-            self.monitorActiveGames.start()
-        except RuntimeError:
-            self.logger.debug(f'Active game monitor already running')
+                # create a game with the players and no bots
+                self.games.append(Table(players, self.bot))
+                for player in players:
+                    cur.execute('DELETE FROM queue WHERE user_id=?', (player,))
+                    players[players.index(player)] = self.bot.get_user(player)
+                con.commit()
+                self.bot.loop.create_task(self.games[-1].setup(False))
+                self.logger.info(f'Created a game with players {", ".join([str(player) for player in players])}')
+                try:
+                    self.monitorActiveGames.start()
+                except RuntimeError:
+                    self.logger.debug(f'Active game monitor already running')
+                con.commit()
+                return True
 
 
 def setup(bot):

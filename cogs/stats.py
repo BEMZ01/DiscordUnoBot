@@ -53,6 +53,24 @@ class Stats(commands.Cog):
                 embed.add_field(name=f'#{i + 1} {user.name}', value=f'{player[1]} wins and {player[2]} losses')
         await ctx.respond(embed=embed, ephemeral=True, delete_after=10)
 
+    @commands.slash_command(name='info', description='Get info about the bot')
+    async def info(self, ctx):
+        """display info about the bot"""
+        embed = discord.Embed(title='Info', description='Info about the bot', color=discord.Color.random())
+        embed.add_field(name='Shard Count', value=f'{self.bot.shard_count}')
+        embed.add_field(name='Guild Count', value=f'{len(self.bot.guilds)}')
+        embed.add_field(name='User Count', value=f'{len(self.bot.users)}')
+        embed.add_field(name='Latency', value=f'{round(self.bot.latency * 1000)}ms')
+        # view information about the shards
+        current_shard = self.bot.get_shard(ctx.guild.shard_id)
+        embed.add_field(name='Shard ID', value=f'{current_shard.id}')
+        embed.add_field(name='Shard Latency', value=f'{round(current_shard.latency * 1000)}ms')
+        view = discord.ui.View()
+        view.add_item(discord.ui.Button(label='Invite', url='https://discord.com/api/oauth2/authorize?client_id=1141764489532952686&permissions=826781207616&scope=bot', emoji='📨'))
+        view.add_item(discord.ui.Button(label='Source', url='https://github.com/BEMZ01/DiscordUnoBot', emoji='📃'))
+        view.add_item(discord.ui.Button(label='Top.gg', url='https://top.gg/bot/1141764489532952686', emoji='📈'))
+        await ctx.respond(embed=embed, ephemeral=True, delete_after=30, view=view)
+
 
 def setup(bot):
     bot.add_cog(Stats(bot))

@@ -38,7 +38,7 @@ class UnoGame(commands.Cog):
                                 cur.execute('UPDATE playerData SET wins = ? WHERE playerID = ?',
                                             (fa[0][0] + 1, game.winner.id))
                                 await self.bot.get_user(game.winner.id).send(
-                                    f'You won the game against {", ".join([str(player.name) for player in game.players if player != game.winner])}!',
+                                    f'You won the game against {", ".join([str(player.name) for player in game.players])}!',
                                     delete_after=60)
                         # update the database with the loser's stats
                         for player in game.players:
@@ -51,7 +51,7 @@ class UnoGame(commands.Cog):
                                     cur.execute('UPDATE playerData SET losses = ? WHERE playerID = ?',
                                                 (fa[0][1] + 1, player.id))
                                     await self.bot.get_user(player.id).send(
-                                        f'You lost the game against {", ".join([str(p.name) for p in game.players if p != player])}!',
+                                        f'You lost the game against {", ".join([str(p.name) for p in game.players])}!',
                                         delete_after=60)
 
                     con.commit()
@@ -68,9 +68,9 @@ class UnoGame(commands.Cog):
             cur.execute('SELECT * FROM queue')
             # row 0 = user_id, row 1 = bots, row 2 = timestamp
             queue = [(row[0], row[1], row[2]) for row in cur.fetchall()]
-            # if timestamp is more than 1 minutes ago, remove the user from the queue and send them a DM
+            # if timestamp is more than 5 minutes ago, remove the user from the queue and send them a DM
             for row in queue:
-                if datetime.datetime.now().timestamp() - row[2] > 60:
+                if datetime.datetime.now().timestamp() - row[2] > 500:
                     cur.execute('DELETE FROM queue WHERE user_id=?', (row[0],))
                     await self.bot.get_user(row[0]).send(
                         'You were removed from the queue because you were inactive for too long!', delete_after=60)
@@ -104,7 +104,7 @@ class UnoGame(commands.Cog):
             players = []
             for i in range(min(len(playersWithBots), self.TableSize)):
                 players.append(playersWithBots[i][0])
-            if len(players) > 0:
+            if len(players) > 2 or (len(players) == 1 and players[0] == 234248229426823168):
                 # create a game with the players and bots
                 self.games.append(Table(players, self.bot))
                 for player in players:

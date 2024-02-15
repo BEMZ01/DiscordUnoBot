@@ -72,9 +72,12 @@ class Stats(commands.Cog):
         embed.add_field(name='User Count', value=f'{len(self.bot.users)}')
         embed.add_field(name='Latency', value=f'{round(self.bot.latency * 1000)}ms')
         # view information about the shards
-        current_shard = self.bot.get_shard(ctx.guild.shard_id)
-        embed.add_field(name='Shard ID', value=f'{current_shard.id}')
-        embed.add_field(name='Shard Latency', value=f'{round(current_shard.latency * 1000)}ms')
+        try:
+            current_shard = self.bot.get_shard(ctx.guild.shard_id)
+            embed.add_field(name='Shard ID', value=f'{current_shard.id}')
+            embed.add_field(name='Shard Latency', value=f'{round(current_shard.latency * 1000)}ms')
+        except AttributeError:
+            pass
         view = discord.ui.View()
         view.add_item(discord.ui.Button(label='Invite', url='https://discord.com/api/oauth2/authorize?client_id=1141764489532952686&permissions=826781207616&scope=bot', emoji='📨'))
         view.add_item(discord.ui.Button(label='Source', url='https://github.com/BEMZ01/DiscordUnoBot', emoji='📃'))

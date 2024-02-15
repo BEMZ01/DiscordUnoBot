@@ -93,7 +93,7 @@ class Bot(Player):
         super().__init__(bot, id)
         if id is None:
             self.id = random.randint(0, 1000000000)
-        self.name = 'Bot '+random.choice(NAMES).strip()
+        self.name = 'Bot ' + random.choice(NAMES).strip()
         self.isBot = True
 
     async def send(self, message=None, embed=None, view=None):
@@ -121,6 +121,9 @@ class Table:
         self.timer = 60  # how long the current player has to play a card before they are skipped
         # and kicked from the game
         self.winner = None
+        self.isBotGame = True if len([player for player in self.players if not player.isBot]) == 0 else False
+        self.status_msg = None
+        self.annoucements = []
 
     @tasks.loop(seconds=10)
     async def update_gameMsg(self):
@@ -129,13 +132,23 @@ class Table:
                 embed, view = await self.createGameEmbedMessage(player)
                 await player.send(embed=embed, view=view)
 
+    @tasks.loop(seconds=5)
+    async def update_statusMsg(self):
+        for player in self.players:
+            if not player.isBot:
+                if self.status_msg is not None:
+                    await self.status_msg.edit(content='\n'.join(self.annoucements[-15:]))
+                else:
+                    self.status_msg = await self.bot.get_user(player.id).send('\n'.join(self.annoucements[-15:]))
+
     @tasks.loop(seconds=10)
     async def check_players(self):
         """If player is inactive for 1 minute 30 seconds, kick them from the game."""
         if self.status == 'started':
             for player in self.players:
                 now = int(datetime.now().timestamp())
-                self.logger.info(f'Player {player.name} was last seen at {now - player.lastSeen}' if not player.isBot else None)
+                self.logger.info(
+                    f'Player {player.name} was last seen at {now - player.lastSeen}' if not player.isBot else None)
                 if now - player.lastSeen > 60 and not player.isBot:
                     await self.bot.get_user(player.id).send(f"You will be kicked from the game in "
                                                             f"{90 - (now - player.lastSeen)} seconds for being "
@@ -154,6 +167,7 @@ class Table:
                         for player in self.players:
                             await player.delete()
                         self.update_gameMsg.stop()
+                        self.update_statusMsg.stop()
                         return True
 
     async def setup(self, bots):
@@ -190,6 +204,7 @@ class Table:
 
     async def start(self):
         if self.status == 'ready':
+            self.update_statusMsg.start()
             self.status = 'started'
             random.shuffle(self.players)
             while self.discard[-1].color == 'black':
@@ -200,10 +215,13 @@ class Table:
             return False
 
     def announce(self, message=None, embed=None, delete_after=None):
-        for player in self.players:
-            if not player.isBot:
-                self.bot.loop.create_task(self.bot.get_user(player.id).send(message, embed=embed,
-                                                                            delete_after=delete_after))
+        if message is not None and embed is None:
+            self.annoucements.append(message)
+        else:
+            for player in self.players:
+                if not player.isBot:
+                    self.bot.loop.create_task(self.bot.get_user(player.id).send(message, embed=embed,
+                                                                                delete_after=delete_after))
 
     def canPlay(self, card, player):
         # A card is allowed to be played if it is the same color or type as the top card in the discard pile
@@ -232,7 +250,10 @@ class Table:
     def play(self, player, card):
         if self.canPlay(card, player):
             self.discard.append(card)
+            self.announce(f'{player.name} has played a {card.color.title()} {card.type}!', delete_after=10)
             player.hand.remove(card)
+            if player.isBot:
+                self.logger.info(f'Bot {player.name} played a {card.color} {card.type}')
             return True
         else:
             return False
@@ -246,6 +267,8 @@ class Table:
             data = json.loads(interaction.data['custom_id'])
             color = data['data']['color']
             self.discard[-1].overridenColor = color
+            self.announce(f'{self.players[self.currentPlayerIndex].name} has chosen the color {color}!',
+                          delete_after=10)
 
         if self.status == 'started':
             # Next player
@@ -258,6 +281,8 @@ class Table:
                 if self.players[self.currentPlayerIndex].isBot:
                     # if the player is a bot, choose a random color
                     self.discard[-1].overridenColor = random.choice(['red', 'yellow', 'green', 'blue'])
+                    self.announce(f'{self.players[self.currentPlayerIndex].name} has chosen the color '
+                                  f'{self.discard[-1].overridenColor}!', delete_after=10)
                 else:
                     view = discord.ui.View()
                     for color in ['red', 'yellow', 'green', 'blue']:
@@ -286,7 +311,9 @@ class Table:
                 elif topCard.type == 'reverse':
                     self.players.reverse()
                     self.currentPlayerIndex = self.players.index(self.players[self.currentPlayerIndex])
-                    self.announce(f'The order of play has been reversed!', delete_after=10)
+                    # PLAYERNAME has reversed the order of play!
+                    self.announce(f'{self.players[self.currentPlayerIndex + 1].name} has reversed the order of play!',
+                                  delete_after=10)
                     self.currentPlayerIndex += 1
                     if self.currentPlayerIndex >= len(self.players):
                         self.currentPlayerIndex -= len(self.players) + 1
@@ -297,6 +324,9 @@ class Table:
                 # check if the player has to pick up cards
                 if self.force_pickup > 0:
                     print(f"Giving {self.force_pickup} cards to {self.players[self.currentPlayerIndex].name}")
+                    self.announce(
+                        f'{self.players[self.currentPlayerIndex].name} has to pick up {self.force_pickup} cards!',
+                        delete_after=10)
                     if not self.players[self.currentPlayerIndex].isBot:
                         await self.bot.get_user(self.players[self.currentPlayerIndex].id).send(
                             f"You have to pick up {self.force_pickup} cards!", delete_after=10)
@@ -320,6 +350,8 @@ class Table:
                 for i, card in enumerate(self.players[self.currentPlayerIndex].hand):
                     if self.canPlay(card, self.players[self.currentPlayerIndex]):
                         self.play(self.players[self.currentPlayerIndex], card)
+                        # sleep for a random float time between 0.5 and 3 seconds to simulate thinking
+                        await asyncio.sleep(random.uniform(0.01, 1.5))
                         await self.tick({'type': 'play_card', 'data': {'card': {'index': i},
                                                                        'player': self.players[
                                                                            self.currentPlayerIndex].id}})
@@ -342,6 +374,7 @@ class Table:
                 self.discard.append(topCard)
                 self.announce("The deck has been reshuffled!", delete_after=10)
             player.hand.append(self.deck.pop())
+            self.announce(f'{player.name} has drawn a card!', delete_after=10)
             return True
         else:
             return False
